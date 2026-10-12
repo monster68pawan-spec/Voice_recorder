@@ -1,0 +1,214 @@
+VOICE RECORDER
+COMPLETE PROJECT FLOW AND HOW IT WORKS
+======================================
+
+1. PROJECT PURPOSE
+------------------
+This is a small Python desktop application for recording microphone audio and
+saving it as a WAV file. It uses a Tkinter window for the controls and
+SoundDevice to capture audio from an input device.
+
+The user starts a recording, watches an elapsed-time display, then stops and
+chooses where to save the recording. The default save location is the
+Saved_Recording folder beside the Python source file.
+
+2. PROJECT FILES
+----------------
+voice_recorder.py
+    Contains the complete application: window setup, audio-device selection,
+    recording callback, timer, save dialog, WAV writing, and shutdown logic.
+
+VOICE_RECORDER_FLOW.txt
+    This explanation of the application's behavior and execution flow.
+
+Saved_Recording/
+    Created automatically beside voice_recorder.py the first time the user
+    stops a recording and reaches the save dialog. It is the initial directory
+    offered for saving, but the user can select another location.
+
+3. TECHNOLOGY AND REQUIREMENTS
+------------------------------
+- Python 3
+- Tkinter for the graphical interface
+- sounddevice for microphone input (uses the PortAudio audio system)
+- wave for writing WAV-format audio
+- queue for transferring captured audio chunks from the audio callback to the
+  main application thread
+- pathlib, datetime, and time from the Python standard library
+- A working microphone/input device and operating-system permission to use it
+
+The third-party Python package sounddevice must be installed. The computer
+also needs a usable audio input device and compatible PortAudio support.
+Microphone permissions are controlled by the operating system.
+
+4. HOW THE APPLICATION STARTS
+-----------------------------
+Run the program from a terminal:
+
+    python3 voice_recorder.py
+
+When the file is run directly:
+
+1. The __main__ block creates the Tk root window.
+2. VoiceRecorder(root) initializes audio settings and the user interface.
+3. root.mainloop() starts Tkinter's event loop, which handles button presses,
+   window updates, and timer callbacks.
+
+During VoiceRecorder initialization, the application selects input device 0,
+requests that device's default sample rate, and prepares mono, 16-bit integer
+audio capture. The sounddevice device query happens before the window is fully
+constructed; if that query fails, the exception reaches the outer startup
+handler and is printed to the terminal.
+
+5. WINDOW AND INITIAL STATE
+---------------------------
+The window is titled "Voice Recorder", is set to 500 by 350 pixels, and cannot
+be resized. It displays:
+
+- A Voice Recorder heading.
+- An elapsed-time label, initially 00:00.
+- A status label, initially "Status: Ready to record".
+- A Start Recording button, initially enabled.
+- A Stop & Save button, initially disabled.
+- An Exit button.
+
+The VoiceRecorder instance tracks:
+
+device       The input device index (0).
+channels     Number of captured channels (1, mono).
+dtype        Captured audio sample format ("int16").
+sample_rate  The default sample rate reported for input device 0.
+recording    Whether the application is currently recording.
+stream       The active SoundDevice InputStream, or None.
+audio_queue  Thread-safe queue containing captured byte chunks.
+start_time   The time.time() value when the current recording began.
+
+6. START RECORDING FLOW
+-----------------------
+Clicking Start Recording calls start_recording():
+
+1. If a recording is already active, the method returns without starting a
+   second stream.
+2. Any leftover chunks in audio_queue are removed so they cannot be mixed into
+   the new recording.
+3. A SoundDevice InputStream is created for device 0 using the device's
+   default sample rate, one channel, and int16 samples. audio_callback() is
+   registered to receive microphone data.
+4. The stream starts capturing audio.
+5. recording becomes True and start_time is set to the current system time.
+6. Start Recording is disabled, Stop & Save is enabled, and the status changes
+   to "Status: Recording...".
+7. update_timer() is called to begin updating the elapsed-time display.
+
+If anything in stream setup or startup raises an exception, the app clears its
+stream reference and displays a microphone error dialog with the exception
+details.
+
+7. AUDIO CAPTURE AND BUFFERING
+------------------------------
+While the input stream is active, SoundDevice calls audio_callback() as audio
+arrives.
+
+1. If SoundDevice reports an audio status warning, the callback prints it to
+   the terminal.
+2. The callback copies the input block and converts it to bytes.
+3. The resulting bytes are added to audio_queue.
+
+The queue separates the real-time audio callback from the later file-writing
+step. The callback does not open or write the WAV file; audio is accumulated in
+memory until the user stops recording. As a result, recordings use memory
+proportional to their duration.
+
+8. RECORDING TIMER
+------------------
+update_timer() returns immediately if recording is no longer active.
+Otherwise, it subtracts start_time from the current time, converts the elapsed
+seconds to minutes and seconds, updates the label as MM:SS, and schedules
+itself again after 1,000 milliseconds with root.after().
+
+The timer is a display of elapsed wall-clock time. Audio capture itself is
+provided by SoundDevice, not by the Tkinter timer.
+
+9. STOPPING AND SAVING A RECORDING
+----------------------------------
+Clicking Stop & Save calls stop_recording():
+
+1. If no recording is active, it does nothing.
+2. It sets recording to False, then stops and closes the input stream and
+   clears the stream reference.
+3. It drains all queued audio chunks, preserving their order, and joins them
+   into one byte string.
+4. If the byte string is empty, the app shows a "No audio" warning and resets
+   the controls.
+5. Otherwise, it builds a default filename using the current date and time:
+
+       recording_YYYY-MM-DD_HH-MM-SS.wav
+
+6. It creates Saved_Recording beside voice_recorder.py if that folder does not
+   already exist.
+7. A save dialog opens with the default filename, default directory, and WAV
+   file filter. The user may choose a different path.
+8. If the user cancels the dialog, the captured audio is discarded, the status
+   becomes "Status: Recording discarded", and the controls are reset.
+9. If a path is selected, the application writes a WAV file:
+       - one channel (mono)
+       - sample width of 2 bytes (16 bits)
+       - the selected microphone's default sample rate
+       - the joined captured audio bytes as WAV frames
+10. It resets the interface, changes the status to indicate successful save,
+    and displays the saved path in a success dialog.
+
+Errors raised while stopping the stream, collecting audio, opening the save
+dialog, or writing the WAV file are shown in an error dialog. The app then
+resets its controls.
+
+10. WAV FILE DETAILS
+--------------------
+The application writes uncompressed PCM-style WAV data with a 16-bit sample
+width, mono channel layout, and the selected device's default sample rate.
+The wave module writes the WAV header and frame data. The actual audio sample
+bytes are produced by SoundDevice according to the configured int16 format.
+
+The program does not compress, edit, normalize, or play recordings. It also
+does not retain a recording after it has been saved or discarded.
+
+11. RESET AND EXIT BEHAVIOR
+---------------------------
+reset_interface() marks the app as not recording, resets the timer label to
+00:00, enables Start Recording, and disables Stop & Save.
+
+Clicking Exit calls close_application(). If a stream is active, the app tries
+to stop and close it, then destroys the window. Closing while recording does
+not open the save dialog and does not save the queued audio, so the current
+recording is discarded.
+
+12. FUNCTION MAP
+----------------
+VoiceRecorder.__init__(root)  Reads microphone settings, initializes state, and
+                              constructs the interface.
+audio_callback(...)           Copies incoming microphone blocks into the queue.
+start_recording()             Clears old chunks, opens the input stream, and
+                              switches the interface to recording mode.
+update_timer()                Updates elapsed time every second while recording.
+stop_recording()              Stops capture, gathers audio, prompts for a path,
+                              writes a WAV file, and reports the outcome.
+reset_interface()              Restores the timer and button states.
+close_application()            Stops an active stream if possible and exits.
+
+13. LIMITATIONS AND PRACTICAL NOTES
+-----------------------------------
+- Device index 0 is hard-coded. On computers with multiple microphones, this
+  may not be the intended input device.
+- The program uses the selected device's default sample rate and does not
+  provide device, sample-rate, or channel-selection controls.
+- Captured audio is buffered in memory until recording stops. Very long
+  recordings can therefore consume substantial memory.
+- The displayed timer uses elapsed wall-clock seconds and is not a measurement
+  of the exact audio frame count.
+- Audio is saved only after Stop & Save and the user selects a destination.
+  Cancelling the dialog or exiting during recording discards the current
+  recording.
+- This app records audio only; it has no playback, trimming, pause, or
+  recording-library features.
+- Microphone access and usable input devices depend on operating-system
+  configuration and permissions.
